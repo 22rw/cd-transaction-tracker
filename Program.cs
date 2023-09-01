@@ -10,7 +10,7 @@ namespace ComdirectTransactionTracker
     {
         static void Main(string[] args)
         {
-            var app = new CommandApp<StartCommand>();
+            var app = new CommandApp<StartCommand>();   
             app.Run(args);
         }
     }

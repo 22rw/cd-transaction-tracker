@@ -2,23 +2,27 @@
 using ComdirectTransactionTracker.Dtos;
 using ComdirectTransactionTracker.Services;
 using Config.Net;
+using Newtonsoft.Json;
 using Spectre.Console.Cli;
 using System.Diagnostics.CodeAnalysis;
+using System.Net.Http.Headers;
 
 namespace ComdirectTransactionTracker.Commands
 {
     public class StartCommand : Command<StartCommand.Settings>
     {
+        private const string _baseUrl = "https://api.comdirect.de";
+
         private volatile ValidComdirectToken token;
         private SemaphoreSlim semaphore = new(1);
 
         public sealed class Settings : CommandSettings
         {
             [CommandArgument(0, "[username]")]
-            public string? Username { get; }
+            public string? Username { get; set; }
 
             [CommandArgument(1, "[password]")]
-            public string? Password { get; }
+            public string? Password { get; set; }
         }
 
         public override int Execute([NotNull] CommandContext context, [NotNull] Settings settings)
@@ -58,6 +62,13 @@ namespace ComdirectTransactionTracker.Commands
 
             Console.WriteLine("Running initial flow, do not forget to activate the TAN in your photoTAN App");
             token = comdirectAuthService.RunInitialAsync().GetAwaiter().GetResult();
+            Console.WriteLine("First token retrieved: " + token.ToString());
+
+            // /banking/v2/accounts/{accountId}/balances
+
+            GetAccountBalance(settings.Username, comdirectAuthService.SessionId);
+
+            return 0;
 
             System.Timers.Timer pollTimer, renewalTimer;
 
@@ -83,7 +94,7 @@ namespace ComdirectTransactionTracker.Commands
             pollTimer.Elapsed += delegate
             {
                 semaphore.Wait();
-                // Do something with the api
+                //GetAccountBalance(settings.Username, comdirectAuthService.SessionId);
                 semaphore.Release();
             };
             pollTimer.Start();
@@ -92,6 +103,34 @@ namespace ComdirectTransactionTracker.Commands
             Console.ReadKey();
 
             return 0;
+        }
+
+        public void GetAccountBalance(string accountId, string sessionId)
+        {
+            string balanceEndpoint = $"{_baseUrl}/banking/v2/accounts/{accountId}/balances";
+
+            using var httpClient = new HttpClient();
+
+            httpClient.DefaultRequestHeaders
+               .Accept
+               .Add(new MediaTypeWithQualityHeaderValue("application/json"));
+
+            httpClient.DefaultRequestHeaders.Authorization =
+                    new AuthenticationHeaderValue("Bearer", token.AccessToken);
+
+            var httpRequestInfo = new { clientRequestId = new { sessionId = sessionId, requestId = Guid.NewGuid() } };
+            var serializedHttpRequestInfo = JsonConvert.SerializeObject(httpRequestInfo);
+
+            httpClient.DefaultRequestHeaders.Add("x-http-request-info", serializedHttpRequestInfo);
+
+            var request = new HttpRequestMessage(HttpMethod.Get, balanceEndpoint);
+
+            var result = httpClient.Send(request);
+
+            Console.WriteLine(result.Content.ReadAsStringAsync().GetAwaiter().GetResult());
+
+            //var comdirectSessionStatus = JsonConvert.DeserializeObject<List<ComdirectGetSessionStatusResponse>>(result.Content.ReadAsStringAsync().GetAwaiter().GetResult());
+            //return comdirectSessionStatus[0];
         }
     }
 }
